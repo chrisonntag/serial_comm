@@ -1,1 +1,13 @@
 
+2018-09-28 16:47:10,634 - __main__ - MainThread - DEBUG - Abrechnung auf
+
+2018-09-28 16:47:10,651 - __main__ - MainThread - DEBUG - Ready for charging on station with tag D6 4F C9 3B
+2018-09-28 16:47:10,682 - __main__ - MainThread - DEBUG - Verstanden
+
+2018-09-28 16:47:22,934 - __main__ - MainThread - DEBUG - Tag ID= D6 4F C9 3B
+
+2018-09-28 16:47:22,934 - __main__ - MainThread - DEBUG - total FERTIG
+
+2018-09-28 16:48:44,019 - __main__ - MainThread - DEBUG - LADER 1 lebt
+
+2018-09-28 16:48:44,020 - __main__ - MainThread - DEBUG - Charger 1 is alive

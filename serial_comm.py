@@ -108,9 +108,8 @@ class SerialListener:
                 rfid_match = re.match(self.regexp['rfid'], rfid_line)
                 if rfid_match:
                     tag_id = rfid_match.group(1)
-                    logger.debug("Ready for charging on station"
-                                 " %s with tag %s" % (alive_match.group(1), tag_id))
-                    self.ser.write('OK_Lader1')
+                    logger.debug("Ready for charging on station with tag %s" % tag_id)
+                    self.ser.write('OK_Lader1!\r\n'.encode())
 
             """
             if line_params[0].split('/')[0] == 'MMETERING':
