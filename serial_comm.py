@@ -19,7 +19,7 @@ class Session:
 
     def __init__(self, header):
         self.id = None
-        self.charging_station = header['Name']
+        self.charging_station = header['Id']
         self.key = header['Key']
         self.start_time = None
         self.end_time = None
@@ -71,8 +71,9 @@ class SessionHandler:
         session.open()
         self.sessions[session.get_session_id()] = session
 
-        logger.debug("New session with id %d has been added." % session.get_session_id)
-        return 'OK', session.get_session_id()
+        logger.debug("New session with id %d on charger %d has been "
+                     "started." % (session.get_session_id, session.get_charging_station()))
+        return 'OK_Lader%d' % session.get_charging_station()
 
 
 class SerialListener:
@@ -83,13 +84,33 @@ class SerialListener:
                  stopbits=serial.STOPBITS_ONE):
         self.ser = serial.Serial(port, baud, bytesize, parity, stopbits)
         self.handler = SessionHandler()
-        self.key_value_pattern = '[\w\d]+: [\w\d]+'
+        self.regexp = {
+            'alive': 'LADER ([0-9]+) lebt',
+            'start': '(Abrechnung auf)',
+            'rfid': 'Tag ID = (([0-9A-F\s|A-F0-9\s]{3})+)',
+            'check': '(Verstanden)',
+            'end': '(total FERTIG)',
+        }
 
     def listen(self):
         while True:
+            # TODO: Separate bus reading and processing
             line = str(self.ser.readline(), 'ascii')
             logger.debug(line)
             line_params = line.split(' ')
+
+            alive_match = re.match(self.regexp['alive'], line)
+            start_match = re.match(self.regexp['start'], line)
+            if alive_match:
+                logger.debug('Charger %s is alive' % alive_match.group(1))
+            elif start_match:
+                rfid_line = str(self.ser.readline(), 'ascii')
+                rfid_match = re.match(self.regexp['rfid'], rfid_line)
+                if rfid_match:
+                    tag_id = rfid_match.group(1)
+                    logger.debug("Ready for charging on station"
+                                 " %s with tag %s" % (alive_match.group(1), tag_id))
+                    self.ser.write('OK_Lader1')
 
             """
             if line_params[0].split('/')[0] == 'MMETERING':
@@ -129,5 +150,5 @@ class SerialListener:
             self.ser.write('MMETERING/1.0 ERROR\n'.encode())
 
 
-listener = SerialListener('/dev/ttys001')
+listener = SerialListener('/dev/ttyUSB1')
 listener.listen()

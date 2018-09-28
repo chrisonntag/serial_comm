@@ -21,8 +21,8 @@
       <file leaf-file-name="serial_comm.py" pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/serial_comm.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="177">
-              <caret line="99" column="34" lean-forward="false" selection-start-line="99" selection-start-column="34" selection-end-line="99" selection-end-column="34" />
+            <state relative-caret-position="312">
+              <caret line="152" column="38" lean-forward="false" selection-start-line="152" selection-start-column="38" selection-end-line="152" selection-end-column="38" />
               <folding>
                 <element signature="e#0#13#0" expanded="true" />
               </folding>
@@ -43,8 +43,8 @@
     <option name="CHANGED_PATHS">
       <list>
         <option value="$PROJECT_DIR$/serial.py" />
-        <option value="$PROJECT_DIR$/serial_comm.py" />
         <option value="$PROJECT_DIR$/serial_comm.log" />
+        <option value="$PROJECT_DIR$/serial_comm.py" />
       </list>
     </option>
   </component>
@@ -451,8 +451,8 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/serial_comm.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="177">
-          <caret line="99" column="34" lean-forward="false" selection-start-line="99" selection-start-column="34" selection-end-line="99" selection-end-column="34" />
+        <state relative-caret-position="312">
+          <caret line="152" column="38" lean-forward="false" selection-start-line="152" selection-start-column="38" selection-end-line="152" selection-end-column="38" />
           <folding>
             <element signature="e#0#13#0" expanded="true" />
           </folding>
