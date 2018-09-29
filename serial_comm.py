@@ -3,6 +3,8 @@ import re
 import random
 from datetime import datetime
 import logging
+import threading
+from queue import Queue
 
 
 logging.basicConfig(filename='serial_comm.log',
@@ -76,14 +78,36 @@ class SessionHandler:
         return 'OK_Lader%d' % session.get_charging_station()
 
 
-class SerialListener:
-    def __init__(self, port,
+class SerialListener(threading.Thread):
+    def __init__(self, port, serial_in: Queue, serial_out: Queue,
                  baud=19200,
                  bytesize=serial.EIGHTBITS,
                  parity=serial.PARITY_NONE,
                  stopbits=serial.STOPBITS_ONE):
+        threading.Thread.__init__(self)
         self.ser = serial.Serial(port, baud, bytesize, parity, stopbits)
-        self.handler = SessionHandler()
+        self.serial_in = serial_in
+        self.serial_out = serial_out
+
+    def run(self):
+        while True:
+            # read data from the bus
+            line = str(self.ser.readline(), 'ascii')
+            logger.debug('INCOMING>' + line.replace('\n', ''))
+            self.serial_in.put(line)
+
+            # write data to the bus
+            if not self.serial_out.empty():
+                data = self.serial_out.get()
+                logger.debug('OUTGOING>' + data)
+                self.ser.write(data + '\r\n'.encode())
+
+
+class SerialHandler(threading.Thread):
+    def __init__(self, serial_in: Queue, serial_out: Queue):
+        threading.Thread.__init__(self)
+        self.serial_in = serial_in
+        self.serial_out = serial_out
         self.regexp = {
             'alive': 'LADER ([0-9]+) lebt',
             'start': '(Abrechnung auf)',
@@ -92,45 +116,23 @@ class SerialListener:
             'end': '(total FERTIG)',
         }
 
-    def listen(self):
+    def run(self):
         while True:
-            # TODO: Separate bus reading and processing
-            line = str(self.ser.readline(), 'ascii')
-            logger.debug(line)
-            line_params = line.split(' ')
+            if not self.serial_in.empty():
+                data = self.serial_in.get()
+                alive_match = re.match(self.regexp['alive'], data)
+                start_match = re.match(self.regexp['start'], data)
+                if alive_match:
+                    logger.debug('Charger %s is alive' % alive_match.group(1))
+                elif start_match and not self.serial_in.empty():
+                    rfid_line = self.serial_in.get()
+                    rfid_match = re.match(self.regexp['rfid'], rfid_line)
+                    if rfid_match:
+                        tag_id = rfid_match.group(1)
+                        logger.debug("Ready for charging on station with tag %s" % tag_id)
+                        self.serial_out.put('OK_Lader1!')
 
-            alive_match = re.match(self.regexp['alive'], line)
-            start_match = re.match(self.regexp['start'], line)
-            if alive_match:
-                logger.debug('Charger %s is alive' % alive_match.group(1))
-            elif start_match:
-                rfid_line = str(self.ser.readline(), 'ascii')
-                rfid_match = re.match(self.regexp['rfid'], rfid_line)
-                if rfid_match:
-                    tag_id = rfid_match.group(1)
-                    logger.debug("Ready for charging on station with tag %s" % tag_id)
-                    self.ser.write('OK_Lader1!\r\n'.encode())
-
-            """
-            if line_params[0].split('/')[0] == 'MMETERING':
-                content_length = str(self.ser.readline(), 'ascii').split(": ")
-
-                chunk = {
-                    'Version': line_params[0].split("/")[1],
-                    'Action': line_params[1].rstrip(),
-                    'Content-Length': int(content_length[1].rstrip())
-                }
-
-                for i in range(0, chunk['Content-Length']):
-                    header = str(self.ser.readline(), 'ascii')
-
-                    kv = header.split(': ')
-                    chunk[kv[0]] = kv[1].rstrip()
-
-                print(chunk)
-                self.handle(chunk)
-            """
-    def handle(self, header):
+    def process(self, header):
         if header['Action'] == 'START':
             # new session will be started
             status, session_id = self.handler.start(Session(header))
@@ -149,5 +151,14 @@ class SerialListener:
             self.ser.write('MMETERING/1.0 ERROR\n'.encode())
 
 
-listener = SerialListener('/dev/ttyUSB1')
-listener.listen()
+if __name__ == '__main__':
+    in_queue = Queue()
+    out_queue = Queue()
+
+    listener = SerialListener('/dev/ttyUSB1', in_queue, out_queue)
+    handler = SerialHandler(in_queue, out_queue)
+
+    listener.start()
+    handler.start()
+    listener.join()
+    handler.join()
