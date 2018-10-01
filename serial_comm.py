@@ -1,16 +1,15 @@
+import os, pty
 import serial
 import re
-import random
 from datetime import datetime
 import logging
 import threading
+import uuid
 from queue import Queue
+from time import sleep
 
-
-logging.basicConfig(filename='serial_comm.log',
-                    level=logging.DEBUG,
-                    format='%(asctime)s - %(name)s - %(threadName)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+_FINISH = False
 
 
 class Session:
@@ -19,63 +18,33 @@ class Session:
     by the charging station.
     """
 
-    def __init__(self, header):
-        self.id = None
-        self.charging_station = header['Id']
-        self.key = header['Key']
+    def __init__(self, charging_station, tag):
+        self.id = uuid.uuid4()
+        self.charging_station = charging_station
+        self.tag = tag
         self.start_time = None
         self.end_time = None
 
+    def is_open(self):
+        return self.start_time is not None and self.end_time is None
+
     def open(self):
-        self.set_session_id(random.randint(0, 1000))
-        self.start_time = datetime.timestamp()
+        self.start_time = datetime.today()
 
     def close(self):
-        self.end_time = datetime.timestamp()
+        self.end_time = datetime.today()
+        # TODO: Query consumption values and save session to DB
+
+        return self.tag
 
     def get_charging_station(self):
         return self.charging_station
 
-    def get_rfid_key(self):
-        return self.key
+    def get_tag(self):
+        return self.tag
 
     def get_session_id(self):
         return self.id
-
-    def set_session_id(self, session_id):
-        self.id = session_id
-
-
-class SessionHandler:
-    """
-    Handles communication according to the MMETERING/1.0 protocol.
-    """
-
-    def __init__(self):
-        self.sessions = dict()
-
-    def is_empty(self):
-        return self.sessions == {}
-
-    def get(self, key):
-        return self.sessions[key]
-
-    def end(self, key):
-        logger.debug("Session %d will be closed." % key)
-
-        session = self.sessions[key]
-        del self.sessions[key]
-        session.close()
-
-        return 'OK', session.get_session_id()
-
-    def start(self, session):
-        session.open()
-        self.sessions[session.get_session_id()] = session
-
-        logger.debug("New session with id %d on charger %d has been "
-                     "started." % (session.get_session_id, session.get_charging_station()))
-        return 'OK_Lader%d' % session.get_charging_station()
 
 
 class SerialListener(threading.Thread):
@@ -84,81 +53,121 @@ class SerialListener(threading.Thread):
                  bytesize=serial.EIGHTBITS,
                  parity=serial.PARITY_NONE,
                  stopbits=serial.STOPBITS_ONE):
-        threading.Thread.__init__(self)
+        threading.Thread.__init__(self, name='SerialListenerThread')
         self.ser = serial.Serial(port, baud, bytesize, parity, stopbits)
         self.serial_in = serial_in
         self.serial_out = serial_out
 
     def run(self):
+        self.ser.flushInput()
+        self.ser.flushOutput()
+
         while True:
+            if _FINISH:
+                self.ser.close()
+                break
+
             # read data from the bus
-            line = str(self.ser.readline(), 'ascii')
-            logger.debug('INCOMING>' + line.replace('\n', ''))
-            self.serial_in.put(line)
+            res = b''
+            if self.ser.inWaiting() > 0:
+                res = self.ser.readline()
+            line = str(res, 'ascii')
+
+            if len(line) > 0 and line != ' ':
+                logger.debug('INCOMING>' + line.replace('\n', ''))
+                self.serial_in.put_nowait(line)
 
             # write data to the bus
             if not self.serial_out.empty():
-                data = self.serial_out.get()
+                data = self.serial_out.get_nowait()
                 logger.debug('OUTGOING>' + data)
-                self.ser.write(data + '\r\n'.encode())
+                data += '\r\n'
+                self.ser.write(data.encode())
 
 
 class SerialHandler(threading.Thread):
     def __init__(self, serial_in: Queue, serial_out: Queue):
-        threading.Thread.__init__(self)
+        threading.Thread.__init__(self, name='SerialHandlerThread')
+        self.sessions = dict()
         self.serial_in = serial_in
         self.serial_out = serial_out
         self.regexp = {
             'alive': 'LADER ([0-9]+) lebt',
             'start': '(Abrechnung auf)',
-            'rfid': 'Tag ID = (([0-9A-F\s|A-F0-9\s]{3})+)',
+            'rfid': 'Tag\s?ID\s?=\s?((?:(?:[0-9A-F|A-F0-9]{2}\s?))+)',
             'check': '(Verstanden)',
             'end': '(total FERTIG)',
         }
 
     def run(self):
         while True:
+            if _FINISH:
+                break
+
             if not self.serial_in.empty():
-                data = self.serial_in.get()
+                data = self.serial_in.get_nowait()
+                logger.debug('PROCESS>' + data.replace('\r\n', ''))
                 alive_match = re.match(self.regexp['alive'], data)
                 start_match = re.match(self.regexp['start'], data)
+                tag_match = re.match(self.regexp['rfid'], data)
                 if alive_match:
-                    logger.debug('Charger %s is alive' % alive_match.group(1))
-                elif start_match and not self.serial_in.empty():
-                    rfid_line = self.serial_in.get()
+                    logger.info('Charger %s is alive' % alive_match.group(1))
+                elif start_match:
+                    logger.debug('PROCESS>Wait for Tag ID')
+                    # TODO: Check queue.Empty exception where block==True
+                    rfid_line = self.serial_in.get(block=True, timeout=3)
                     rfid_match = re.match(self.regexp['rfid'], rfid_line)
                     if rfid_match:
                         tag_id = rfid_match.group(1)
-                        logger.debug("Ready for charging on station with tag %s" % tag_id)
-                        self.serial_out.put('OK_Lader1!')
+                        logger.info('Ready for charging on station with tag %s' % tag_id)
+                        self.serial_out.put_nowait('OK_Lader1!')
+                        session = Session(1, tag_id)
+                        self.sessions[tag_id] = session
 
-    def process(self, header):
-        if header['Action'] == 'START':
-            # new session will be started
-            status, session_id = self.handler.start(Session(header))
-        else:
-            # closes a session
-            try:
-                status, session_id = self.handler.end(header['Session-Id'])
-            except KeyError:
-                # couldn't find the session_id, maybe transmission error
-                status = 'ERROR'
+                        check_line = self.serial_in.get(block=True, timeout=3)
+                        check_match = re.match(self.regexp['check'], check_line)
+                        if check_match:
+                            session.open()
+                            logger.info('Charging has been started with tag %s' % tag_id)
+                elif tag_match:
+                    end_line = self.serial_in.get(block=True, timeout=3)
+                    end_match = re.match(self.regexp['end'], end_line)
+                    if end_match:
+                        tag_id = tag_match.group(1)
+                        try:
+                            session = self.sessions[tag_id]
+                            del self.sessions[session.close()]
+                        except KeyError:
+                            logger.error('Could not found session initiated with tag %s' % tag_id)
+                        logger.info('Charging has been stopped with tag %s' % tag_id)
 
-        if status is not 'ERROR':
-            self.ser.write('MMETERING/1.0 OK\n'.encode())
-            self.ser.write(('Session-Id: %d\n' % session_id).encode())
-        else:
-            self.ser.write('MMETERING/1.0 ERROR\n'.encode())
 
-
-if __name__ == '__main__':
+class EVCS:
     in_queue = Queue()
     out_queue = Queue()
 
-    listener = SerialListener('/dev/ttyUSB1', in_queue, out_queue)
-    handler = SerialHandler(in_queue, out_queue)
+    def __init__(self, port, logfile='serial_comm.log', loglevel=logging.DEBUG,
+                 logformat='%(asctime)s - %(name)s - %(threadName)s - %(levelname)s - %(message)s'):
+        logging.basicConfig(filename=logfile, level=loglevel, format=logformat)
+        self.listener = SerialListener(port, EVCS.in_queue, EVCS.out_queue)
+        self.handler = SerialHandler(EVCS.in_queue, EVCS.out_queue)
 
-    listener.start()
-    handler.start()
-    listener.join()
-    handler.join()
+    def start(self):
+        self.listener.start()
+        self.handler.start()
+
+    def stop(self):
+        global _FINISH
+        _FINISH = True
+        self.handler.join()
+        self.listener.join()
+
+
+if __name__ == '__main__':
+    master, slave = pty.openpty()
+
+    evcs = EVCS(os.ttyname(slave))
+    evcs.start()
+
+    os.write(master, b"LADER 1 lebt\r\n")
+    evcs.stop()
