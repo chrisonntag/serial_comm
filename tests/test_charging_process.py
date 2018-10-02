@@ -61,7 +61,8 @@ class ChargingTest(unittest.TestCase):
         os.write(ChargingTest._master, b'total FERTIG\r\n')
         sleep(0.3)
 
-        self.assertEqual('Charging has been stopped with tag D6 4F C9 3B\n', ChargingTest.check_log())
+        self.assertEqual('Could not found session initiated with tag D6 4F C9 3B\n', ChargingTest.check_log())
+        self.assertRaises(KeyError, ChargingTest._evcs.sessions['D6 4F C9 3B'])
 
     def test_charging_end(self):
         os.write(ChargingTest._master, b'Abrechnung auf\r\n')
@@ -70,12 +71,14 @@ class ChargingTest(unittest.TestCase):
         sleep(0.3)
 
         ChargingTest.check_log()
+        self.assertTrue(ChargingTest._evcs.sessions['D6 4F C9 3B'].is_open())
 
         os.write(ChargingTest._master, b'Tag ID = D6 4F C9 3B\r\n')
         os.write(ChargingTest._master, b'total FERTIG\r\n')
         sleep(0.3)
 
         self.assertEqual('Charging has been stopped with tag D6 4F C9 3B\n', ChargingTest.check_log())
+        self.assertDictEqual(ChargingTest._evcs.sessions, {})
 
 
 if __name__ == "__main__":

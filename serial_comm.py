@@ -86,9 +86,9 @@ class SerialListener(threading.Thread):
 
 
 class SerialHandler(threading.Thread):
-    def __init__(self, serial_in: Queue, serial_out: Queue):
+    def __init__(self, serial_in: Queue, serial_out: Queue, sessions):
         threading.Thread.__init__(self, name='SerialHandlerThread')
-        self.sessions = dict()
+        self.sessions = sessions
         self.serial_in = serial_in
         self.serial_out = serial_out
         self.regexp = {
@@ -118,7 +118,7 @@ class SerialHandler(threading.Thread):
                     rfid_line = self.serial_in.get(block=True, timeout=3)
                     rfid_match = re.match(self.regexp['rfid'], rfid_line)
                     if rfid_match:
-                        tag_id = rfid_match.group(1)
+                        tag_id = rfid_match.group(1).replace('\r', '')
                         logger.info('Ready for charging on station with tag %s' % tag_id)
                         self.serial_out.put_nowait('OK_Lader1!')
                         session = Session(1, tag_id)
@@ -133,7 +133,7 @@ class SerialHandler(threading.Thread):
                     end_line = self.serial_in.get(block=True, timeout=3)
                     end_match = re.match(self.regexp['end'], end_line)
                     if end_match:
-                        tag_id = tag_match.group(1)
+                        tag_id = tag_match.group(1).replace('\r', '')
                         try:
                             session = self.sessions[tag_id]
                             del self.sessions[session.close()]
@@ -145,12 +145,13 @@ class SerialHandler(threading.Thread):
 class EVCS:
     in_queue = Queue()
     out_queue = Queue()
+    sessions = dict()
 
     def __init__(self, port, logfile='serial_comm.log', loglevel=logging.DEBUG,
                  logformat='%(asctime)s - %(name)s - %(threadName)s - %(levelname)s - %(message)s'):
         logging.basicConfig(filename=logfile, level=loglevel, format=logformat)
         self.listener = SerialListener(port, EVCS.in_queue, EVCS.out_queue)
-        self.handler = SerialHandler(EVCS.in_queue, EVCS.out_queue)
+        self.handler = SerialHandler(EVCS.in_queue, EVCS.out_queue, EVCS.sessions)
 
     def start(self):
         self.listener.start()
