@@ -165,10 +165,11 @@ class EVCS:
 
 
 if __name__ == '__main__':
-    master, slave = pty.openpty()
+    # master, slave = pty.openpty()
+    # s_name = os.ttyname(slave)
 
-    evcs = EVCS(os.ttyname(slave))
+    evcs = EVCS('/dev/ttyUSB1')
     evcs.start()
 
-    os.write(master, b"LADER 1 lebt\r\n")
-    evcs.stop()
+    # os.write(master, b"LADER 1 lebt\r\n")
+    # evcs.stop()
