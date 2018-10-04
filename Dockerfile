@@ -11,3 +11,5 @@ WORKDIR /serial_evcs/
 
 RUN touch serial_comm.log
 RUN chmod 0777 serial_comm.log
+
+CMD [ "python", "./serial_comm.py" ]
